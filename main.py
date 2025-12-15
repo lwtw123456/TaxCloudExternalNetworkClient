@@ -555,8 +555,8 @@ class App(TkinterDnD.Tk):
         return resp, file_name
 
     def _upload_async_core(self, file_path=None):
-        self.after(0, self.btn_confirm.config(state="disabled"))
-        self.after(0, self.btn_download.config(state="disabled"))
+        self.after(0, lambda: self.btn_confirm.config(state="disabled"))
+        self.after(0, lambda: self.btn_download.config(state="disabled"))
 
         def _next_name(name, n):
             base, ext = os.path.splitext(name)
@@ -598,8 +598,8 @@ class App(TkinterDnD.Tk):
 
             break
 
-        self.after(0, self.btn_confirm.config(state="normal"))
-        self.after(0, self.btn_download.config(state="normal"))
+        self.after(0, lambda: self.btn_confirm.config(state="normal"))
+        self.after(0, lambda: self.btn_download.config(state="normal"))
 
     def upload_async(self, file_path=None):
         run_async(self._upload_async_core, file_path)
