@@ -331,7 +331,7 @@ class App(TkinterDnD.Tk):
             self.append_log("[配置] 已从配置文件读取上次的验证码，正在自动验证...")
             self.after(100, self.on_unlock_clicked)
 
-    def ensure_host_configured(self, auto_popup ):
+    def ensure_host_configured(self, auto_popup):
         if self._is_host_configured():
             return True
         self.append_log("[配置] 未检测到服务器地址(HOST)，请先点击“配置地址”进行设置。")
@@ -581,7 +581,7 @@ class App(TkinterDnD.Tk):
             if resp.status_code == 200:
                 json_data = resp.json()
                 if json_data.get('success'):
-                    self.append_log(f"[上传] 成功，文件名为「{file_name}」")
+                    self.after(0, lambda: self.append_log(f"[上传] 成功，文件名为「{file_name}」"))
                 else:
                     msg = json_data.get("msg")
                     if msg == "中转上传文件中已存在同名文件":
@@ -590,7 +590,7 @@ class App(TkinterDnD.Tk):
                     else:
                         self.append_log(f"[上传] 失败，{msg}。")
             else:
-                self.append_log(f"[上传] 失败！服务器故障或服务器地址错误。")
+                self.after(0, lambda: self.append_log(f"[上传] 失败！服务器故障或服务器地址错误。"))
 
             if need_retry:
                 self.after(0, lambda fn=file_name: self.append_log(f"[上传] 检测到同名，自动更名后重试：{fn}"))
