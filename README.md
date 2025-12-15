@@ -113,6 +113,7 @@ nuitka --standalone --onefile --windows-console-mode=disable --enable-plugin=tk-
 ## 📁 项目结构
 
     ├── main.py                # 主程序
+    ├── utils.py               # 工具函数
     ├── README.md              # 项目文档
     ├── requirements.txt       # 依赖列表
     ├── LICENSE                # 开源许可
