@@ -102,6 +102,8 @@ pip install nuitka
 # 编译为单文件可执行程序
 nuitka --standalone --onefile --windows-console-mode=disable --enable-plugin=tk-inter --output-filename=TaxCloudClient.exe main.py
 ```
+
+------------------------------------------------------------------------
 ## 🧰 主要依赖
 
 -   ttkbootstrap
