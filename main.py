@@ -213,6 +213,7 @@ class App(TkinterDnD.Tk):
         screen_w, screen_h = self.winfo_screenwidth(), self.winfo_screenheight()
         x, y = (screen_w - width) // 2, (screen_h - height) // 2
         self.geometry(f"{width}x{height}+{x}+{y}")
+        self.resizable(False, False)
 
         self.client = RequestClient(self._on_request_error)
         config_path = os.path.join(sys.path[0], "config.ini")
@@ -292,11 +293,6 @@ class App(TkinterDnD.Tk):
 
         self.text_log = scrolledtext.ScrolledText(log_card, wrap="word", font=("Consolas", 9), state="disabled", height=8)
         self.text_log.pack(fill=BOTH, expand=True, padx=8, pady=8)
-
-        status_frame = tb.Frame(self)
-        status_frame.pack(fill=X, side=BOTTOM)
-        self.lbl_status = tb.Label(status_frame, text="就绪", anchor="w", bootstyle="secondary")
-        self.lbl_status.pack(fill=X, padx=8, pady=4)
 
         self.append_log("[启动] 界面加载完成，如首次使用请先点击“配置地址”设置 HOST，然后输入验证码并点击“确定”。")
 
@@ -466,7 +462,6 @@ class App(TkinterDnD.Tk):
             self.text_log.see("end")
             self.text_log.configure(state="disabled")
             short = message if len(message) < 80 else message[:77] + "..."
-            self.lbl_status.config(text=short)
             
         if current_thread() is main_thread():
             write_log(message)
@@ -862,6 +857,8 @@ class App(TkinterDnD.Tk):
                         self.append_log(f"[加载] 失败：无法解析文件编码。")
                         return
 
+                    text = text.replace('\r\n', '\n').replace('\r', '\n')
+                    
                     self.text_main.delete("1.0", "end")
                     self.text_main.insert("1.0", text)
                     self.append_log(f"[加载] 完成，文件「{file_name}」已加载到文本输入框。")
