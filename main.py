@@ -11,7 +11,6 @@ from datetime import datetime
 from io import BytesIO
 from threading import Event
 from typing import Callable, List, Optional
-from abc import ABC, abstractmethod
 import requests
 import ttkbootstrap as tb
 from tkinter import filedialog, scrolledtext, messagebox
