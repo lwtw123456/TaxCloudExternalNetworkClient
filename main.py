@@ -1010,6 +1010,7 @@ class App(TkinterDnD.Tk):
 
     def apply_locked_ui(self):
         self.state_obj.locked = True
+        self.entry_code.config(state="normal")
         self.btn_confirm.config(state="disabled")
         self.btn_download.config(state="disabled")
         self.drop_area.config(text="请先验证验证码以启用拖拽功能", bootstyle="secondary")
