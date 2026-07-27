@@ -1,3 +1,5 @@
 ttkbootstrap>=1.10.0
 tkinterdnd2>=0.3.0
 requests>=2.31.0
+rapidocr>=3.8.1
+onnxruntime>=1.24.3
