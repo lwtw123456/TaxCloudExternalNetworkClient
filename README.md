@@ -19,6 +19,7 @@
 - 文件操作：支持查询文件列表、下载及文本文件在线查看与编辑
 - 性能优化：上传下载均为异步执行，避免界面卡顿
 - 日志与异常：实时输出操作日志，统一处理网络与服务器异常
+- 图片识别：上传或下载的图片自动OCR并显示在文本框中
 
 ---
 
@@ -84,25 +85,13 @@ python main.py
 
 ---
 
-## 🔨 编译指南
-
-如需自行编译，请使用以下命令：
-
-```bash
-# 安装 Nuitka
-pip install nuitka
-
-# 编译为单文件可执行程序
-nuitka --standalone --onefile --windows-console-mode=disable --enable-plugin=tk-inter --output-filename=TaxCloudClient.exe main.py
-```
-
----
-
 ## 🧰 主要依赖
 
 - ttkbootstrap
 - tkinterdnd2
 - requests
+- rapidocr
+- onnxruntime
 
 ---
 
