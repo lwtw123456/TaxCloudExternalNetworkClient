@@ -25,7 +25,6 @@ from utils import (
     decode_response_content,
 )
 
-
 # ============================
 # 网络请求客户端（网络访问层）
 # ============================
@@ -154,6 +153,28 @@ class RequestClient:
 # ============================
 # 配置与持久化
 # ============================
+APP_NAME = "TaxCloudTransferClient"
+
+def get_config_path(filename="config.ini"):
+    if sys.platform == "win32":
+        base_dir = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA")
+        if not base_dir:
+            base_dir = os.path.expanduser("~")
+        config_dir = os.path.join(base_dir, APP_NAME)
+
+    elif sys.platform == "darwin":
+        config_dir = os.path.join(
+            os.path.expanduser("~/Library/Application Support"),
+            APP_NAME
+        )
+
+    else:
+        base_dir = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
+        config_dir = os.path.join(base_dir, APP_NAME)
+
+    os.makedirs(config_dir, exist_ok=True)
+    return os.path.join(config_dir, filename)
+
 class ConfigManager:
     def __init__(self, config_path: str, logger=None):
         self.config_path = config_path
@@ -198,6 +219,10 @@ class ConfigManager:
             self._config.set("session", "code", code)
 
         try:
+            config_dir = os.path.dirname(self.config_path)
+            if config_dir:
+                os.makedirs(config_dir, exist_ok=True)
+
             with open(self.config_path, "w", encoding="utf-8") as f:
                 self._config.write(f)
             if host is not None:
@@ -386,7 +411,7 @@ class TransferService:
             resp = self.client.upload_file(code_value, file_name, file_size, f)
         return resp, file_name
 
-    def upload_with_retry(self, code_value: str, text_value: Optional[str] = None, file_path: Optional[str] = None):
+    def upload_with_retry(self, code_value, text_value = None, file_path = None, text_file_name = None):
         def _next_name(name, n):
             base, ext = os.path.splitext(name)
             return f"{base}({n}){ext}"
@@ -394,24 +419,33 @@ class TransferService:
         if file_path:
             origin_name = os.path.basename(file_path)
         else:
-            origin_name = f"文本{get_filename_suffix()}.txt"
+            origin_name = text_file_name or f"文本{get_filename_suffix()}.txt"
 
         logs = []
         attempt = 0
 
         while True:
             if attempt == 0:
-                override_name = None
+                override_name = origin_name
             else:
                 override_name = _next_name(origin_name, attempt)
 
             if file_path:
-                resp, file_name = self.upload_local_file(code_value, file_path, override_name=override_name)
+                resp, file_name = self.upload_local_file(
+                    code_value,
+                    file_path,
+                    override_name=override_name,
+                )
             else:
-                resp, file_name = self.upload_text(code_value, text_value, override_name=override_name)
+                resp, file_name = self.upload_text(
+                    code_value,
+                    text_value,
+                    override_name=override_name,
+                )
 
             if resp.status_code == 200:
                 json_data = resp.json()
+
                 if json_data.get("success"):
                     logs.append(f"[上传] 成功，文件名为「{file_name}」")
                     return {
@@ -419,32 +453,34 @@ class TransferService:
                         "logs": logs,
                         "need_stop_monitor": False,
                     }
-                else:
-                    msg = json_data.get("msg")
-                    if msg == "中转上传文件中已存在同名文件":
-                        logs.append(f"[上传] 已存在同名文件{file_name}，自动更名后重试")
-                        attempt += 1
-                        continue
-                    elif msg == "上传码已失效":
-                        return {
-                            "success": False,
-                            "logs": logs,
-                            "need_stop_monitor": True,
-                        }
-                    else:
-                        logs.append(f"[上传] 失败，{msg}。")
-                        return {
-                            "success": False,
-                            "logs": logs,
-                            "need_stop_monitor": False,
-                        }
-            else:
-                logs.append("[上传] 失败！服务器故障或服务器地址错误。")
+
+                msg = json_data.get("msg")
+
+                if msg == "中转上传文件中已存在同名文件":
+                    logs.append(f"[上传] 已存在同名文件{file_name}，自动更名后重试")
+                    attempt += 1
+                    continue
+
+                if msg == "上传码已失效":
+                    return {
+                        "success": False,
+                        "logs": logs,
+                        "need_stop_monitor": True,
+                    }
+
+                logs.append(f"[上传] 失败，{msg}。")
                 return {
                     "success": False,
                     "logs": logs,
                     "need_stop_monitor": False,
                 }
+
+            logs.append("[上传] 失败！服务器故障或服务器地址错误。")
+            return {
+                "success": False,
+                "logs": logs,
+                "need_stop_monitor": False,
+            }
 
 
 class DownloadService:
@@ -453,9 +489,13 @@ class DownloadService:
         ".css", ".json", ".xml", ".md", ".yaml", ".yml", ".ini", ".cfg", ".sh", ".bat",
         ".java", ".cs", ".go", ".rs", ".php", ".rb", ".sql", ".log", ".csv"
     }
+    IMAGE_EXTENSIONS = {
+        ".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"
+    }
 
     def __init__(self, client: RequestClient):
         self.client = client
+        self._rapid_ocr = None
 
     def get_downloadable_files(self, code_value: str) -> dict:
         resp = self.client.get_file_list(code_value)
@@ -496,7 +536,76 @@ class DownloadService:
     def can_load_to_text(self, file_name: str) -> bool:
         ext = os.path.splitext(file_name)[1].lower()
         return ext in self.TEXT_EXTENSIONS
+        
+    def can_ocr_to_text(self, file_name: str) -> bool:
+        ext = os.path.splitext(file_name)[1].lower()
+        return ext in self.IMAGE_EXTENSIONS
 
+    def _get_rapid_ocr_engine(self):
+        if self._rapid_ocr is None:
+            from rapidocr import RapidOCR
+            self._rapid_ocr = RapidOCR()
+        return self._rapid_ocr
+
+    def _extract_ocr_text(self, result) -> str:
+        txts = getattr(result, "txts", None)
+        if not txts:
+            return ""
+        return "\n".join(str(t).strip() for t in txts if str(t).strip())
+
+    def ocr_image_content(self, file_id: str, file_name: str) -> dict:
+        resp = self.client.download_file(file_id)
+        if resp.status_code != 200:
+            return {"success": False, "status_code": resp.status_code}
+
+        try:
+            engine = self._get_rapid_ocr_engine()
+
+            result = engine(resp.content)
+
+            text = self._extract_ocr_text(result)
+            return {
+                "success": True,
+                "text": text,
+            }
+
+        except ImportError:
+            return {
+                "success": False,
+                "missing_rapidocr": True,
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "exception": e,
+            }
+            
+    def ocr_local_image(self, file_path: str) -> dict:
+        try:
+            with open(file_path, "rb") as f:
+                image_bytes = f.read()
+
+            engine = self._get_rapid_ocr_engine()
+            result = engine(image_bytes)
+
+            text = self._extract_ocr_text(result)
+
+            return {
+                "success": True,
+                "text": text,
+            }
+
+        except ImportError:
+            return {
+                "success": False,
+                "missing_rapidocr": True,
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "exception": e,
+            }
 
 # ============================
 # Presenter / Controller
@@ -655,11 +764,28 @@ class AppPresenter:
         if not self.ensure_host_configured(auto_popup=True):
             return
 
+        code_value = self.view.get_code_input()
+
         for p in paths:
             p = p.strip()
             if not p:
                 continue
-            self.log(f"[上传] 正在上传文件：{os.path.basename(p)} ...")
+
+            file_name = os.path.basename(p)
+
+            if self.download_service.can_ocr_to_text(file_name):
+                use_ocr = self.view.ask_ocr_before_upload(file_name)
+
+                if use_ocr:
+                    self.log(f"[OCR] 已选择 OCR，正在识别图片：{file_name} ...")
+                    self.scheduler.run_background(
+                        self._ocr_and_upload_file_worker,
+                        p,
+                        code_value,
+                    )
+                    continue
+
+            self.log(f"[上传] 正在上传文件：{file_name} ...")
             self.scheduler.run_background(self._upload_file_worker, p)
 
     def _upload_text_worker(self, text_value: str):
@@ -692,6 +818,67 @@ class AppPresenter:
             self.scheduler.call_ui(self.stop_monitor)
 
         self.scheduler.call_ui(self.view.set_transfer_buttons_enabled, True)
+        
+    def _ocr_and_upload_file_worker(self, file_path: str, code_value: str):
+        self.scheduler.call_ui(
+            self.view.set_transfer_buttons_enabled,
+            False,
+        )
+
+        file_name = os.path.basename(file_path)
+
+        try:
+            ocr_result = self.download_service.ocr_local_image(file_path)
+
+            if not ocr_result["success"]:
+                if ocr_result.get("missing_rapidocr"):
+                    self.log(
+                        "[OCR] 失败：未安装 RapidOCR，"
+                        "请先执行：pip install rapidocr onnxruntime"
+                    )
+
+                elif ocr_result.get("exception") is not None:
+                    self.log(f"[OCR] 失败：{ocr_result['exception']}")
+
+                else:
+                    self.log(f"[OCR] 失败：无法识别图片「{file_name}」。")
+
+                return
+
+            text = ocr_result["text"]
+
+            if not text.strip():
+                self.log(
+                    f"[OCR] 完成，但图片「{file_name}」"
+                    "未识别到文字，已取消上传。"
+                )
+                return
+
+            base_name = os.path.splitext(file_name)[0]
+            text_file_name = f"{base_name}_OCR.txt"
+
+            self.log(
+                f"[OCR] 识别完成，正在上传识别结果："
+                f"{text_file_name} ..."
+            )
+
+            upload_result = self.transfer_service.upload_with_retry(
+                code_value=code_value,
+                text_value=text,
+                text_file_name=text_file_name,
+            )
+
+            for msg in upload_result["logs"]:
+                self.log(msg)
+
+            if upload_result["need_stop_monitor"]:
+                self.scheduler.call_ui(self.stop_monitor)
+
+        finally:
+            self.scheduler.call_ui(
+                self.view.set_transfer_buttons_enabled,
+                True,
+            )
 
     def on_download_clicked(self):
         if self.state.locked:
@@ -747,6 +934,36 @@ class AppPresenter:
     def load_file_to_text_async(self, file_id: str, file_name: str):
         self.scheduler.run_background(self._load_file_to_text_worker, file_id, file_name)
 
+    def ocr_file_to_text_async(self, file_id: str, file_name: str):
+        self.scheduler.run_background(self._ocr_file_to_text_worker, file_id, file_name)
+
+    def _ocr_file_to_text_worker(self, file_id: str, file_name: str):
+        self.log(f"[OCR] 正在识别图片：{file_name} ...")
+        result = self.download_service.ocr_image_content(file_id, file_name)
+
+        def ui_after_resp():
+            if not result["success"]:
+                if result.get("status_code") is not None:
+                    self.log(f"[OCR] 失败！服务器返回状态码 {result['status_code']}。")
+                    return
+                if result.get("missing_rapidocr"):
+                    self.log("[OCR] 失败：未安装 RapidOCR，请先执行：pip install rapidocr onnxruntime")
+                    return
+                if result.get("exception") is not None:
+                    self.log(f"[OCR] 失败：{result['exception']}")
+                    return
+                self.log("[OCR] 失败。")
+                return
+
+            self.view.set_main_text(result["text"])
+
+            if result["text"].strip():
+                self.log(f"[OCR] 完成，图片「{file_name}」的识别结果已加载到文本输入框。")
+            else:
+                self.log(f"[OCR] 完成，但图片「{file_name}」未识别到文字。")
+
+        self.scheduler.call_ui(ui_after_resp)
+
     def _load_file_to_text_worker(self, file_id: str, file_name: str):
         self.log(f"[加载] 正在加载文件：{file_name} ...")
         result = self.download_service.load_text_content(file_id)
@@ -773,8 +990,11 @@ class AppPresenter:
     def build_download_display_name(self, selected_names: List[str]) -> str:
         return self.download_service.build_download_display_name(selected_names)
 
-    def can_load_to_text(self, file_name: str) -> bool:
+    def can_load_to_text(self, file_name: str):
         return self.download_service.can_load_to_text(file_name)
+        
+    def can_ocr_to_text(self, file_name: str) -> bool:
+        return self.download_service.can_ocr_to_text(file_name)
 
 # ============================
 # UI 视图层
@@ -796,7 +1016,7 @@ class App(TkinterDnD.Tk):
         self.state_obj = AppState()
 
         self.client = RequestClient()
-        config_path = os.path.join(sys.path[0], "config.ini")
+        config_path = get_config_path()
 
         self.scheduler = TkScheduler(self)
         self.logger = UILogger(self.append_log)
@@ -973,11 +1193,21 @@ class App(TkinterDnD.Tk):
         self.text_main.delete("1.0", "end")
         self.text_main.insert("1.0", text)
 
-    def ask_save_path(self, default_name: str) -> str:
+    def ask_save_path(self, default_name: str):
         return filedialog.asksaveasfilename(
             parent=self,
             title="选择文件保存位置",
             initialfile=default_name,
+        )
+        
+    def ask_ocr_before_upload(self, file_name: str) -> bool:
+        return messagebox.askyesno(
+            "图片上传",
+            f"检测到图片文件：{file_name}\n\n"
+            "是否先进行 OCR？\n\n"
+            "选择“是”：上传 OCR 识别结果（TXT）\n"
+            "选择“否”：直接上传原图片",
+            parent=self,
         )
 
     def set_transfer_buttons_enabled(self, enabled: bool):
@@ -1215,15 +1445,32 @@ class App(TkinterDnD.Tk):
             self.presenter.load_file_to_text_async(fid, fname)
             win.destroy()
 
+        def on_ocr_to_text():
+            selection = listbox.curselection()
+            if len(selection) != 1:
+                return
+            idx = selection[0]
+            fid, fname = id_name_list[idx]
+            self.presenter.ocr_file_to_text_async(fid, fname)
+            win.destroy()
+
         def update_load_button_state(event=None):
             selection = listbox.curselection()
-            if len(selection) == 1:
-                idx = selection[0]
-                _, fname = id_name_list[idx]
-                if self.presenter.can_load_to_text(fname):
-                    btn_load_text.config(state="normal")
-                    return
+
             btn_load_text.config(state="disabled")
+            btn_ocr_text.config(state="disabled")
+
+            if len(selection) != 1:
+                return
+
+            idx = selection[0]
+            _, fname = id_name_list[idx]
+
+            if self.presenter.can_load_to_text(fname):
+                btn_load_text.config(state="normal")
+
+            if self.presenter.can_ocr_to_text(fname):
+                btn_ocr_text.config(state="normal")
 
         btn_download = tb.Button(btn_frame, text="下载选中文件", bootstyle=SUCCESS, command=on_download_selected)
         btn_download.pack(side=LEFT)
@@ -1236,6 +1483,14 @@ class App(TkinterDnD.Tk):
             state="disabled",
         )
         btn_load_text.pack(side=LEFT, padx=(10, 0))
+        btn_ocr_text = tb.Button(
+            btn_frame,
+            text="OCR到文本框",
+            bootstyle=INFO,
+            command=on_ocr_to_text,
+            state="disabled",
+        )
+        btn_ocr_text.pack(side=LEFT, padx=(10, 0))
 
         btn_close = tb.Button(btn_frame, text="关闭", bootstyle=SECONDARY, command=win.destroy)
         btn_close.pack(side=RIGHT)
@@ -1243,9 +1498,6 @@ class App(TkinterDnD.Tk):
         listbox.bind("<<ListboxSelect>>", update_load_button_state)
         self.show_modal(win)
 
-    # ----------------------------
-    # 事件
-    # ----------------------------
     def _choose_files(self):
         files = filedialog.askopenfilenames(parent=self, title="选择要上传的文件")
         if files:
